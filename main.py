@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
@@ -15,17 +15,14 @@ import time
 import requests
 from urllib.parse import urlparse
 import httpx
-from openai import InternalServerError
+from openai import InternalServerError, APITimeoutError
 import database
-
-
-DG_API_KEY = settings.deepgram_api_key
 
 
 
 timeout = httpx.Timeout(
-    connect=60.0,
-    read=600.0,
+    connect=120.0,
+    read=1800.0,
     write=600.0,
     pool=60.0
 )
@@ -71,7 +68,7 @@ def safe_transcribe(client, **kwargs):
         try:
             return client.audio.transcriptions.create(**kwargs)
 
-        except InternalServerError as e:
+        except (InternalServerError, APITimeoutError) as e:
             print(f"[OpenAI ERROR] Attempt {attempt}/{max_retries} failed: {e}")
             if attempt == max_retries:
                 raise
@@ -204,7 +201,7 @@ def _timestamp_to_seconds(timestamp: str) -> float:
 
 
 # Helper: Format transcript with LLM
-def format_transcript_with_llm(utterances: list) -> str:
+def format_transcript_with_llm(utterances: list, participants: str = None) -> str:
     """
     Use LLM to format transcript professionally using instructions from prompt.md.
     Uses chunking to avoid output token limits.
@@ -267,6 +264,9 @@ def format_transcript_with_llm(utterances: list) -> str:
 
         # Specific prompt for this chunk
         chunk_system_prompt = prompt_instructions + "\n\n" + \
+            (f"PARTICIPANT LIST PROVIDED BY USER: {participants}\n"
+             "INSTRUCTION: Attempt to attribute the diarized labels (Speaker 0, Speaker 1, etc.) to these names based on context clues (e.g., self-introductions, being addressed by name). "
+             "If you are unsure, keep the generic Speaker label.\n\n" if participants else "") + \
             "SPECIAL INSTRUCTION: Output ONLY the formatted conversation dialogue for the provided segments. " \
             "Do NOT output the metadata header, summary, or action items yet. " \
             "Do NOT wrap in markdown code blocks. Just the designated speaker dialogue lines.\n" \
@@ -779,7 +779,10 @@ async def upload_teams_transcript(file: UploadFile = File(...)):
 
 # UPLOAD ENDPOINT - Upload file directly
 @app.post("/transcribe-with-diarization")
-async def transcribe_with_diarization(file: UploadFile = File(...)):
+async def transcribe_with_diarization(
+    file: UploadFile = File(...),
+    participants: str = Form(None)
+):
     ext = Path(file.filename).suffix.lower()
     if ext not in settings.allowed_extensions:
         raise HTTPException(400, f"Allowed: {settings.allowed_extensions}")
@@ -881,7 +884,7 @@ async def transcribe_with_diarization(file: UploadFile = File(...)):
         # -------------------------------------------------------
         # Generate and Save Formatted Transcript with LLM
         # -------------------------------------------------------
-        formatted_transcript, summary_section, extracted_action_items = format_transcript_with_llm(utterances)
+        formatted_transcript, summary_section, extracted_action_items = format_transcript_with_llm(utterances, participants)
         
         with open(formatted_path, "w", encoding="utf-8") as f:
             f.write(formatted_transcript)
@@ -963,46 +966,6 @@ async def transcribe_with_diarization(file: UploadFile = File(...)):
 async def health():
     return {"status": "ok"}
 
-
-@app.post("/deepgram_transcribe")
-async def deepgram_transcribe(file: UploadFile = File(...)):
-    try:
-        audio_bytes = await file.read()
-
-        params = {
-            "punctuate": "true",
-            "diarize": "true",
-            "model": "general",
-            "tier": "enhanced"
-        }
-
-        headers = {
-            "Authorization": f"Token {DG_API_KEY}"
-        }
-
-        response = requests.post(
-            "https://api.deepgram.com/v1/listen",
-            headers=headers,
-            params=params,
-            data=audio_bytes,
-            timeout=300
-        )
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=response.text)
-
-        response_json = response.json()
-
-        grouped = group_speaker_transcript(response_json)
-
-        return {
-            "status": "success",
-            "speakers": grouped,
-            "raw_json": response_json
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

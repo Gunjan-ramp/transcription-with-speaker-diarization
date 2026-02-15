@@ -32,12 +32,12 @@ class Settings(BaseSettings):
     formatting_style: str = "professional"  # Options: professional, meeting, interview, subtitle
     
     # Database Configuration
-    db_server: str = "161.97.142.50"
-    db_name: str = "TranscriptionAI"
-    db_user: str = "ra"
-    db_password: str = "ramp@123"
+    db_server: str = "111.11.111.11"
+    db_name: str = "db_name"
+    db_user: str = "db_user"
+    db_password: str = "db_password"
     db_driver: str = "ODBC Driver 17 for SQL Server"
-    db_trusted_connection: str = "yes"
+    db_trusted_connection: str = "no"
     
     @property
     def database_url(self) -> str:
@@ -57,6 +57,25 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
+
+    # Azure AD / Graph API Configuration
+    azure_client_id: str | None = None
+    azure_client_secret: str | None = None
+    azure_tenant_id: str | None = None
+    azure_redirect_uri: str | None = None
+    
+    # OneDrive Configuration
+    target_user_email: str | None = "gunjan.sh@rampinfotech.ie" 
+    onedrive_folder_path: str = "/Recordings"
+    
+    # Email Configuration
+    manager_email: str | None = None
+    sender_email: str | None = None
+    
+    # Scheduler Configuration
+    check_interval_minutes: int = 60
+
 
 
 # Global settings instance

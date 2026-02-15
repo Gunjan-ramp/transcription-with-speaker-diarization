@@ -10,11 +10,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
-from config import settings
+from .config import settings  # Updated import
 import urllib.parse
 import traceback
 
-Base = declarative_base()
+from sqlalchemy.ext.declarative import DeferredReflection
+
+# Inherit from DeferredReflection to allow runtime schema loaded
+class Base(DeferredReflection, declarative_base()):
+    __abstract__ = True
+
 
 # =========================================================
 # ORM MODELS
@@ -22,74 +27,16 @@ Base = declarative_base()
 
 class Meeting(Base):
     __tablename__ = "Meetings"
-
-    MeetingID = Column(Integer, primary_key=True, autoincrement=True)
-    Title = Column(String(255), nullable=False)
-    MeetingDate = Column(DateTime, nullable=False)
-    DurationMinutes = Column(Integer)
-
-    CalendarEventID = Column(String(255))
-    CalendarSource = Column(String(50))
-
-    AudioFilePath = Column(String(500))
-    FormattedTranscriptPath = Column(String(500))
-    RawJsonPath = Column(String(500))
-    MoMFilePath = Column(String(500))
-
-    ProjectName = Column(String(255))
-    MeetingType = Column(String(100))
-    Notes = Column(Text)
-
-    CreatedAt = Column(DateTime, default=datetime.utcnow)
-    UpdatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    participants = relationship(
-        "Participant",
-        back_populates="meeting",
-        cascade="all, delete-orphan",
-    )
-
-    action_items = relationship(
-        "ActionItem",
-        back_populates="meeting",
-        cascade="all, delete-orphan",
-    )
-
+    # Columns and relationships are loaded from database via reflection
 
 class Participant(Base):
     __tablename__ = "Participants"
 
-    ParticipantID = Column(Integer, primary_key=True, autoincrement=True)
-    MeetingID = Column(Integer, ForeignKey("Meetings.MeetingID"), nullable=False)
-
-    Name = Column(String(255))
-    SpeakerLabel = Column(String(50))
-    Email = Column(String(255))
-    Role = Column(String(100))
-
-    CreatedAt = Column(DateTime, default=datetime.utcnow)
-
-    meeting = relationship("Meeting", back_populates="participants")
-
-
 class ActionItem(Base):
     __tablename__ = "ActionItems"
 
-    ActionItemID = Column(Integer, primary_key=True, autoincrement=True)
-    MeetingID = Column(Integer, ForeignKey("Meetings.MeetingID"), nullable=False)
-
-    Title = Column(String(500), nullable=False)
-    Description = Column(Text)
-    AssignedTo = Column(String(255))
-    DueDate = Column(Date)
-    Priority = Column(String(20), default="Medium")
-    Status = Column(String(50), default="Open")
-
-    CompletedAt = Column(DateTime)
-    CreatedAt = Column(DateTime, default=datetime.utcnow)
-    UpdatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    meeting = relationship("Meeting", back_populates="action_items")
+class EmailLog(Base):
+    __tablename__ = "EmailLogs"
 
 
 # =========================================================
@@ -114,36 +61,11 @@ def init_db():
     try:
         print(f"Connecting to SQL Server at {settings.db_server}...")
 
-        from sqlalchemy import text
-
         # -------------------------------
-        # MASTER CONNECTION (for CREATE DB)
+        # APPLICATION DATABASE CONNECTION
         # -------------------------------
-        master_params = urllib.parse.quote_plus(
-            f"DRIVER={{{settings.db_driver}}};"
-            f"SERVER={settings.db_server};"
-            f"UID={settings.db_user};"
-            f"PWD={settings.db_password};"
-            "TrustServerCertificate=yes;"
-        )
+        print(f"Connecting to database '{settings.db_name}'...")
 
-        master_engine = create_engine(
-            f"mssql+pyodbc:///?odbc_connect={master_params}",
-            echo=False,
-        ).execution_options(isolation_level="AUTOCOMMIT")
-
-        with master_engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT name FROM sys.databases WHERE name = :db"),
-                {"db": settings.db_name},
-            )
-
-            if not result.fetchone():
-                print(f"Database '{settings.db_name}' not found. Creating...")
-                conn.execute(text(f"CREATE DATABASE [{settings.db_name}]"))
-                print(f"Database '{settings.db_name}' created successfully.")
-            else:
-                print(f"Database '{settings.db_name}' already exists.")
 
         # -------------------------------
         # APPLICATION DATABASE CONNECTION
@@ -170,8 +92,12 @@ def init_db():
             bind=engine,
         )
 
-        Base.metadata.create_all(bind=engine)
-        print("✅ Database connected and tables verified.")
+        # Base.metadata.create_all(bind=engine)
+        print(f"Connecting to SQL Server at {settings.db_server} for schema reflection...")
+        
+        # Prepare definitions from database
+        Base.prepare(engine)
+        print("[+] Database schema successfully reflected.")
 
     except Exception:
         print("!!! DATABASE INITIALIZATION FAILED !!!")
@@ -265,12 +191,12 @@ def store_meeting_data(
                 )
 
         session.commit()
-        print(f"✅ Successfully stored meeting {meeting_id}")
+        print(f"[+] Successfully stored meeting {meeting_id}")
         return meeting_id
 
     except Exception as e:
         session.rollback()
-        print(f"❌ Error storing meeting data: {e}")
+        print(f"[-] Error storing meeting data: {e}")
         return None
 
     finally:

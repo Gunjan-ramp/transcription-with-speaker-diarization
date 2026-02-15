@@ -8,3 +8,11 @@ pydub==0.25.1
 audioop-lts==0.2.1
 mutagen==1.47.0
 webvtt-py==0.5.1
+pyodbc
+static-ffmpeg
+msal
+schedule
+sqlalchemy
+openai
+python-docx
+apscheduler

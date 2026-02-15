@@ -51,3 +51,4 @@ output/*.json
 
 # Temporary files
 temp_*
+scripts/

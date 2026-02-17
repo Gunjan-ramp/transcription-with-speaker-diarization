@@ -204,8 +204,23 @@ class GraphService:
     def send_email(self, to_email, subject, content, attachment_paths=None):
         """
         Send email using Graph API (/me/sendMail).
+        to_email can be a single string or a list of strings.
         """
         url = "https://graph.microsoft.com/v1.0/me/sendMail"
+        
+        # Handle single vs list of recipients
+        if isinstance(to_email, str):
+            recipient_list = [to_email]
+        else:
+            recipient_list = to_email
+            
+        to_recipients_payload = [
+            {
+                "emailAddress": {
+                    "address": email.strip()
+                }
+            } for email in recipient_list if email.strip()
+        ]
         
         # Construct email message
         message = {
@@ -214,13 +229,7 @@ class GraphService:
                 "contentType": "HTML",
                 "content": content
             },
-            "toRecipients": [
-                {
-                    "emailAddress": {
-                        "address": to_email
-                    }
-                }
-            ],
+            "toRecipients": to_recipients_payload,
             "attachments": []
         }
         
@@ -266,7 +275,7 @@ class GraphService:
             session = SessionLocal()
             try:
                 log = EmailLog(
-                    Recipient=to_email,
+                    Recipient=",".join(to_email) if isinstance(to_email, list) else to_email,
                     FromEmail=self.user_email,
                     Subject=subject,
                     Status=status,

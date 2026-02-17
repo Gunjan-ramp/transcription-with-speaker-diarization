@@ -53,3 +53,4 @@ output/*.json
 temp_*
 scripts/
 tests/
+logs/

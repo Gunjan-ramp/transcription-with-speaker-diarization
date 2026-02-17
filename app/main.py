@@ -37,6 +37,11 @@ async def root():
         }
     }
 
+@app.on_event("startup")
+def startup_event():
+    from app.scheduler_main import start_scheduler
+    start_scheduler()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=50104)

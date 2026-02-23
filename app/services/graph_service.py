@@ -82,22 +82,14 @@ class GraphService:
         
         data = {
             "client_id": self.client_id,
-            # "client_secret": self.client_secret, # Removed for Public Client (Native/Mobile) flow
+            "client_secret": self.client_secret,
             "scope": "https://graph.microsoft.com/.default", 
             "refresh_token": refresh_token,
             "grant_type": "refresh_token"
         }
         
-        # If a secret is strictly required (Confidential Client), we should add it back.
-        # But the error AADSTS700025 explicitly says "Client is public... neither... should be presented".
-        # So we omit it. If we ever switch back to a Confidential Client (Web App), this needs to be conditional.
-        if self.client_secret and len(self.client_secret) > 0 and "placeholder" not in self.client_secret:
-             pass
-        
-        # SPA apps often require an Origin header matching a redirect URI
-        headers = {
-            "Origin": "http://localhost:3000" # Common default, trying this.
-        }
+        # Web App (Confidential Client) flow doesn't require Origin header like SPA
+        headers = {}
         
         response = requests.post(token_endpoint, data=data, headers=headers)
         

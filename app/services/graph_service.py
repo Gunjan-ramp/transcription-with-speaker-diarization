@@ -115,26 +115,11 @@ class GraphService:
             conn = self._get_db_connection()
             cursor = conn.cursor()
             
-            # We update the existing latest record or insert? 
-            # The user said "can update in the table". 
-            # Let's update the record for this email that is most recent.
-            # OR simpler: Update ALL records for this email? No, that's dangerous.
-            # Let's update the specific row we fetched? We didn't get ID.
-            # Let's just update the most recently created one.
-            
             update_query = """
             UPDATE TOP (1) [Dev_ExpenseApp].[product].[MicrosoftTokens]
             SET access_token = ?, refresh_token = ?, expires_at = ?, updated_at = GETDATE()
             WHERE email_id = ?
             """
-            # Note: T-SQL UPDATE TOP (1) logic:
-            # We need to target the row. Using a subquery or strict WHERE on the latest one is better.
-            # But [id] is distinct. Ideally we should have fetched [id].
-            # Let's assume updating based on email is "ok" but risks updating old rows if not careful.
-            # Better approach: Fetch ID in _authenticate, store it, use it here.
-            # For now, to keep it simple, let's update where email matches.
-            
-            # Wait, better logic: Update the entry with latest created_at
             cursor.execute("""
                 UPDATE [Dev_ExpenseApp].[product].[MicrosoftTokens]
                 SET access_token = ?, refresh_token = ?, expires_at = ?, updated_at = GETDATE()
@@ -158,7 +143,7 @@ class GraphService:
     def list_files_in_folder(self, folder_path):
         """
         List files in a specific folder of the authenticated user's OneDrive.
-        Refactored to use /me endpoint.
+        Refactored to use /me endpoint. Sorting/Filtering handled by caller if needed.
         """
         # Ensure folder path format
         if not folder_path.startswith("/"):
@@ -174,8 +159,6 @@ class GraphService:
             return response.json().get("value", [])
         else:
             print(f"Error listing files: {response.text}")
-            # If 401, maybe token expired during execution? 
-            # Could implement retry logic calling _authenticate() force=True
             return []
 
     def download_file(self, file_id, destination_path):

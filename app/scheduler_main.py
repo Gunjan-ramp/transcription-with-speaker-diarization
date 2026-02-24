@@ -77,22 +77,49 @@ async def job():
 
         graph = GraphService(user_email=target_user)
 
-        logger.info(f"Listing files for {target_user} in '{target_folder}'...")
-        files = graph.list_files_in_folder(target_folder)
+        # Get today's date string for filtering (ISO format: YYYY-MM-DD)
+        today_date_str = datetime.now().strftime("%Y-%m-%d")
 
-        if not files:
+        logger.info(f"Listing files for {target_user} in '{target_folder}'...")
+        all_files = graph.list_files_in_folder(target_folder)
+
+        if not all_files:
             logger.info("No files found or error listing files.")
             return
+
+        # Filter for today's recordings and sort by creation date descending
+        # We also filter by extension here to be cleaner
+        files = []
+        for f in all_files:
+            file_name = f.get("name")
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext not in settings.allowed_extensions:
+                continue
+                
+            created_str = f.get("createdDateTime")
+            if not created_str:
+                continue
+                
+            # createdDateTime is UTC, e.g. 2026-02-24T08:01:28Z
+            if not created_str.startswith(today_date_str):
+                continue
+                
+            files.append(f)
+
+        # Sort files by createdDateTime descending (latest first)
+        files.sort(key=lambda x: x.get("createdDateTime", ""), reverse=True)
+
+        if not files:
+            logger.info(f"No recordings found for today ({today_date_str}).")
+            return
+
+        logger.info(f"Found {len(files)} recordings for today. Processing latest first.")
 
         processed_ids = load_processed_files()
 
         for file in files:
             file_id = file.get("id")
             file_name = file.get("name")
-
-            ext = os.path.splitext(file_name)[1].lower()
-            if ext not in settings.allowed_extensions:
-                continue
 
             if file_id in processed_ids:
                 continue

@@ -157,55 +157,121 @@ def format_transcript_with_llm(utterances: list, participants: str = None) -> st
     # Convert all utterances to a simple string for the summary model
     full_raw_text = "\n".join([f"{u['speaker']}: {u['text']}" for u in utterances])
     
+    # Estimate token count (roughly words * 1.3)
+    word_count = len(full_raw_text.split())
+    
     action_items = []
-    summary_section = "## Meeting Summary\n\n(Summary generation failed)."
+    summary_section = ""
+
+    # Load MoM prompt
+    mom_instructions = load_mom_prompt()
+    if not mom_instructions:
+        mom_instructions = "Generate a structured Meeting Minutes with Action Items, Key Questions, and Chapters & Topics."
 
     try:
-        # We'll ask for JSON to get both the Markdown content AND structured data
-        system_instruction = (
-            "You are a professional meeting secretary. You need to generate a meeting summary based on the transcript.\n"
-            "Output MUST be in JSON format with the following keys:\n"
-            "1. 'summary_markdown': The full markdown text containing Meeting Summary, Key Points, Action Items, Decisions, etc. (Formatted as requested)\n"
-            "2. 'action_items': A list of objects, each having {'title': str, 'description': str, 'assigned_to': str, 'priority': str}\n"
-            "\n"
-            f"Here are the specific formatting instructions for the 'summary_markdown':\n{mom_instructions}"
-        )
+        # If the transcript is very long, use a multi-pass approach
+        if word_count > 6000:
+            print(f"Transcript is long (~{word_count} words). Using multi-pass extraction...")
+            
+            # Phase 1: Chunked Extraction
+            # 4000 words is a safe chunk size for gpt-4o-mini to process and extract from
+            chunk_word_limit = 4000
+            words = full_raw_text.split()
+            transcript_chunks = [" ".join(words[i:i + chunk_word_limit]) for i in range(0, len(words), chunk_word_limit)]
+            
+            extracted_points = []
+            
+            for idx, chunk in enumerate(transcript_chunks):
+                print(f"Extracting points from transcript part {idx+1}/{len(transcript_chunks)}...")
+                extraction_prompt = (
+                    "You are a professional secretary. Analyze the FOLLOWING PART of a meeting transcript.\n"
+                    "Extract any Action Items, Key Questions, Work Status (current/completed tasks), and Main Topics discussed in this specific part.\n"
+                    "Output in JSON format: {'action_items': [{'title': str, 'assigned_to': str}], 'questions': [str], 'work_status': [{'person': str, 'task': str, 'detail': str}], 'topics': [str]}"
+                )
+                
+                res = client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=[
+                        {"role": "system", "content": extraction_prompt},
+                        {"role": "user", "content": chunk}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                extraction_data = json.loads(res.choices[0].message.content)
+                extracted_points.append(extraction_data)
 
-        response = client.chat.completions.create(
-            model=settings.llm_model,
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"Full Transcript:\n{full_raw_text}"}
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"}
-        )
-        
-        content = response.choices[0].message.content.strip()
-        data = json.loads(content)
-        
-        summary_section = data.get("summary_markdown", "")
-        action_items = data.get("action_items", [])
-        
-    except Exception as e:
-        print(f"Error generating summary/actions: {e}")
-        # Fallback to text-only generation if JSON fails
-        try:
+            # Phase 2: Consolidation
+            print("Consolidating extracted points into final MoM...")
+            consolidation_system_instruction = (
+                "You are a professional meeting secretary. You will be provided with extracted items from different parts of a long meeting.\n"
+                "Your task is to consolidate these into a single, high-quality Minutes of Meeting (MOM).\n"
+                "Remove duplicates, merge similar items, and ensure a professional flow.\n"
+                "Output MUST be in JSON format with the following keys:\n"
+                "1. 'summary_markdown': The full markdown text. Follow the structure in the provided instructions.\n"
+                "2. 'action_items': A finalized list of objects {'title': str, 'description': str, 'assigned_to': str, 'priority': str}\n"
+                "3. 'work_status': A consolidated list of objects {'person': str, 'task': str, 'detail': str}\n"
+                "\n"
+                f"Instructions for 'summary_markdown':\n{mom_instructions}"
+            )
+            
+            res = client.chat.completions.create(
+                model=settings.llm_model,
+                messages=[
+                    {"role": "system", "content": consolidation_system_instruction},
+                    {"role": "user", "content": f"Extracted Data from Parts:\n{json.dumps(extracted_points, ensure_ascii=False)}"}
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(res.choices[0].message.content)
+            summary_section = data.get("summary_markdown", "")
+            action_items = data.get("action_items", [])
+
+        else:
+            # Single pass for shorter transcripts
+            print(f"Transcript size (~{word_count} words) is manageable for single pass.")
+            system_instruction = (
+                "You are a professional meeting secretary. Generate a meeting summary based on the transcript.\n"
+                "Output MUST be in JSON format with the following keys:\n"
+                "1. 'summary_markdown': The full markdown text.\n"
+                "2. 'action_items': A list of objects {'title': str, 'description': str, 'assigned_to': str, 'priority': str}\n"
+                "3. 'work_status': A list of objects {'person': str, 'task': str, 'detail': str}\n"
+                "\n"
+                f"Structure instructions for 'summary_markdown':\n{mom_instructions}"
+            )
+
             response = client.chat.completions.create(
                 model=settings.llm_model,
                 messages=[
-                    {"role": "system", "content": mom_instructions},
+                    {"role": "system", "content": system_instruction},
                     {"role": "user", "content": f"Full Transcript:\n{full_raw_text}"}
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            
+            data = json.loads(response.choices[0].message.content.strip())
+            summary_section = data.get("summary_markdown", "")
+            action_items = data.get("action_items", [])
+        
+    except Exception as e:
+        print(f"Error generating summary/actions: {e}")
+        # Final fallback to raw generation if everything else fails
+        try:
+             # Basic fallback logic remains...
+             response = client.chat.completions.create(
+                model=settings.llm_model,
+                messages=[
+                    {"role": "system", "content": mom_instructions},
+                    {"role": "user", "content": f"Full Transcript:\n{full_raw_text[:50000]}"} # Truncate for safety
                 ],
                 temperature=0.3
             )
-            summary_section = response.choices[0].message.content.strip()
-            # Cleanup potential markdown fences
-            if summary_section.startswith("```markdown"): summary_section = summary_section.replace("```markdown", "", 1)
-            if summary_section.startswith("```"): summary_section = summary_section.replace("```", "", 1)
-            if summary_section.endswith("```"): summary_section = summary_section[:-3]
+             summary_section = response.choices[0].message.content.strip()
         except Exception as e2:
-             print(f"Fallback summary generation failed: {e2}")
+             print(f"Critical failure in MOM generation: {e2}")
+             summary_section = "## Meeting Summary\n\n(Summary generation failed due to technical error)."
 
     # --- Phase 3: Assembly ---
     

@@ -63,7 +63,7 @@ class GraphService:
             expires_at = row.expires_at # datetime object
             
             # Check expiration (with 5 minute buffer)
-            if expires_at and datetime.now() >= (expires_at - timedelta(minutes=5)):
+            if expires_at and datetime.utcnow() >= (expires_at - timedelta(minutes=5)):
                 print("Token expired or expiring soon. Refreshing...")
                 self._refresh_and_update_token(refresh_token)
             else:
@@ -99,7 +99,7 @@ class GraphService:
             new_refresh_token = result.get("refresh_token") # Might be new, might be same
             expires_in = result.get("expires_in", 3600)
             
-            new_expires_at = datetime.now() + timedelta(seconds=int(expires_in))
+            new_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
             
             # Update DB
             self._update_db_token(new_access_token, new_refresh_token, new_expires_at)

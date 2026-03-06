@@ -207,8 +207,8 @@ def start_scheduler():
 
     trigger = CronTrigger(
         day_of_week="mon-fri",
-        hour=17,
-        minute=45,
+        hour=15,
+        minute=5,
         timezone="Asia/Kolkata"
     )
 

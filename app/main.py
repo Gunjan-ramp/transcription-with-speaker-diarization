@@ -1,3 +1,8 @@
+import os
+
+os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["SB_FETCH_STRATEGY"] = "copy"
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import static_ffmpeg

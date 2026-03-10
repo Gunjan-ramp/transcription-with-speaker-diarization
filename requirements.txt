@@ -5,7 +5,6 @@ openai>=1.0.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 pydub==0.25.1
-audioop-lts==0.2.1
 mutagen==1.47.0
 webvtt-py==0.5.1
 pyodbc
@@ -16,3 +15,6 @@ sqlalchemy
 openai
 python-docx
 apscheduler
+torch 
+torchaudio 
+pyannote.audio

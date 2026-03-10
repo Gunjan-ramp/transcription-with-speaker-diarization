@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from fastapi import HTTPException
+from app.services.audio_utils import convert_video_to_wav
 
 from app.core.config import settings
 from app.core.openai_client import client
@@ -14,6 +15,13 @@ from app.core import database
 from app.services.audio import split_audio
 from app.services.transcription import safe_transcribe
 from app.services.llm import format_transcript_with_llm
+from app.services.speaker_identification import (
+    load_speaker_samples,
+    get_embedding,
+    match_speaker
+)
+
+from app.services.audio_segments import extract_segment
 
 async def process_transcription(audio_url: str, save_files: bool = True):
     """
@@ -55,7 +63,9 @@ async def process_transcription(audio_url: str, save_files: bool = True):
                 raise FileNotFoundError(f"File not found: {audio_url}")
             shutil.copy(audio_url, temp_path)
         
-        print(f"File downloaded successfully: {temp_path}")
+        if temp_path.endswith(".mp4"):
+            print("Converting video to WAV...")
+            temp_path = convert_video_to_wav(temp_path)
         
         # Validate file extension
         ext = Path(temp_path).suffix.lower()
@@ -106,6 +116,42 @@ async def process_transcription(audio_url: str, save_files: bool = True):
             }
             for seg in all_segments
         ]
+
+        speaker_db = load_speaker_samples("speaker_samples")
+
+        speaker_mapping = {}
+
+        speaker_segments = {}
+
+        # collect segments per speaker
+        for u in utterances:
+            speaker_segments.setdefault(u["speaker"], []).append(u)
+
+        for speaker, segments in speaker_segments.items():
+
+            # use first 10 seconds of speech
+            seg = segments[0]
+
+            segment_file = f"temp_{speaker}.wav"
+
+            extract_segment(
+                temp_path,
+                seg["start"],
+                min(seg["start"] + 10, seg["end"]),
+                segment_file
+            )
+
+            emb = get_embedding(segment_file)
+
+            matched_name = match_speaker(emb, speaker_db)
+
+            speaker_mapping[speaker] = matched_name
+
+            os.remove(segment_file)
+
+        for u in utterances:
+            if u["speaker"] in speaker_mapping:
+                u["speaker"] = speaker_mapping[u["speaker"]]
         
         # Generate formatted transcript
         print("Formatting transcript with LLM...")
@@ -115,7 +161,15 @@ async def process_transcription(audio_url: str, save_files: bool = True):
         
         response_data["total_segments"] = len(utterances)
         response_data["formatted_transcript"] = formatted_transcript
-        response_data["utterances"] = utterances
+        response_data["utterances"] = [
+            {
+                "speaker": str(u["speaker"]),
+                "text": str(u["text"]),
+                "start": float(u["start"]),
+                "end": float(u["end"])
+            }
+            for u in utterances
+        ]
         
         # Save files if requested
         if save_files:

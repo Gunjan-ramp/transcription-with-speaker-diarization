@@ -107,6 +107,25 @@ async def process_transcription(audio_url: str, save_files: bool = True):
             for seg in all_segments
         ]
         
+        # --- NEW: Speaker Identification ---
+        try:
+            print("Running speaker identification against sample audios...")
+            from app.services.speaker_identification import get_speaker_identifier
+            identifier = get_speaker_identifier()
+            samples_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "speaker_samples")
+            
+            # Update utterances with identified speaker names
+            utterances = identifier.identify_speakers(
+                utterances=utterances, 
+                main_audio_path=temp_path, 
+                sample_audio_folder=samples_dir
+            )
+            print("Speaker identification complete.")
+        except Exception as e:
+            print(f"Warning: Speaker identification failed, falling back to generic labels. Error: {e}")
+            traceback.print_exc()
+        # -----------------------------------
+        
         # Generate formatted transcript
         print("Formatting transcript with LLM...")
         formatted_transcript, summary_section, extracted_action_items = format_transcript_with_llm(utterances)

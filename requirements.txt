@@ -16,3 +16,4 @@ sqlalchemy
 openai
 python-docx
 apscheduler
+markdown

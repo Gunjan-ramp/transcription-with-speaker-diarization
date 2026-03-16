@@ -27,6 +27,7 @@ class GraphService:
         )
         
         self.access_token = None
+        self.token_expires_at = None
         self._authenticate()
 
     def _get_db_connection(self):
@@ -68,6 +69,7 @@ class GraphService:
                 self._refresh_and_update_token(refresh_token)
             else:
                 self.access_token = access_token
+                self.token_expires_at = expires_at
                 print("Using existing valid token from DB.")
                 
         except Exception as e:
@@ -105,6 +107,7 @@ class GraphService:
             self._update_db_token(new_access_token, new_refresh_token, new_expires_at)
             
             self.access_token = new_access_token
+            self.token_expires_at = new_expires_at
             print("Token refreshed and DB updated successfully.")
         else:
             raise Exception(f"Failed to refresh token: {response.text}")
@@ -133,7 +136,7 @@ class GraphService:
             raise
 
     def _get_headers(self):
-        if not self.access_token:
+        if not self.access_token or not getattr(self, 'token_expires_at', None) or datetime.utcnow() >= (self.token_expires_at - timedelta(minutes=5)):
             self._authenticate()
         return {
             "Authorization": f"Bearer {self.access_token}",

@@ -179,6 +179,24 @@ class GraphService:
             print(f"Error downloading file {file_id}: {response.text}")
             return False
 
+    def get_upcoming_meetings(self, start_time: datetime, end_time: datetime):
+        """
+        Fetch calendar events between start_time and end_time.
+        Requires Calendars.Read permission.
+        """
+        # Graph API uses ISO 8601 formatting for DateTime
+        start_str = start_time.strftime("%Y-%m-%dT%H:%M:%S")
+        end_str = end_time.strftime("%Y-%m-%dT%H:%M:%S")
+        
+        url = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={start_str}&endDateTime={end_str}"
+        
+        response = requests.get(url, headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json().get("value", [])
+        else:
+            print(f"Error fetching calendar events: {response.text}")
+            return []
+
     def send_email(self, to_email, subject, content, attachment_paths=None):
         """
         Send email using Graph API (/me/sendMail).

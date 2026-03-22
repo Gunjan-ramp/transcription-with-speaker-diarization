@@ -342,7 +342,11 @@ class TeamsBot:
                     str(audio_filename)
                 ]
 
-            print(f"[Bot] Recording from Windows dshow device: {device}")
+            if sys.platform == "win32":
+                print(f"[Bot] Recording from Windows dshow device: {device}")
+            else:
+                print(f"[Bot] Recording from isolated PulseAudio sink: {device}")
+                
             log_filename = os.path.join(self.output_dir, f"ffmpeg_log_{timestamp}.txt")
             self._log_file = open(log_filename, "w")
             

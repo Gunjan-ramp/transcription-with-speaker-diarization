@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  teams-bot:
+    build: .
+    container_name: transcription_teams_bot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional: Copy all .env variables here.
+      - TZ=UTC
+    volumes:
+      # Mount the outputs folder so recordings and transcripts persist on the host
+      - ./output:/app/output
+      # Mount the .env file so secrets don't need to be hardcoded in the image
+      - ./.env:/app/.env
+    # The image is built from Playwright which requires IPC host for browser stability
+    ipc: host
+    # Give the container shm_size to prevent Chromium from crashing on long meetings
+    shm_size: '2gb'

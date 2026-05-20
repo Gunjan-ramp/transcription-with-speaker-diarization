@@ -18,3 +18,4 @@ apscheduler
 markdown
 playwright
 playwright-stealth
+docker

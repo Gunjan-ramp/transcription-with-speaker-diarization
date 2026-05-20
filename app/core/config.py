@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # Scheduler Configuration
     check_interval_minutes: int = 60
 
+    # Docker Isolation Configuration
+    use_docker_isolation: bool = False
+    docker_image: str = "transcription-with-speaker-diarization-teams-bot"
+    docker_host_output_path: str | None = None  # Path on host to mount for output
+    docker_host_env_path: str | None = None     # Path on host to mount for .env
+
 
 
 # Global settings instance

@@ -183,33 +183,81 @@ class TeamsBot:
                 ]
 
                 joined = False
-                for sel in join_selectors:
-                    try:
-                        btn = page.locator(sel).first
+                for attempt in range(3): # Retry up to 3 times
+                    if joined:
+                        break
+                    
+                    for sel in join_selectors:
                         try:
-                            btn.wait_for(state="visible", timeout=2000)
-                            btn.click(force=True)
-                            print(f"[Bot] Clicked join button via main page: {sel}")
-                            joined = True
-                            break
-                        except Exception:
-                            pass
+                            # Try main page
+                            btn = page.locator(sel).first
+                            if btn.is_visible():
+                                btn.click(force=True)
+                                print(f"[Bot] Clicked join button via main page: {sel}")
+                                # Wait for button to disappear or 'Connecting' state
+                                try:
+                                    btn.wait_for(state="hidden", timeout=5000)
+                                    joined = True
+                                    print("[Bot] Join button disappeared. Transitioning...")
+                                    break
+                                except:
+                                    print("[Bot] Join button still visible after click. Retrying...")
                             
-                        frame_btn = page.frame_locator("*").locator(sel).first
-                        try:
-                            frame_btn.wait_for(state="visible", timeout=2000)
-                            frame_btn.click(force=True)
-                            print(f"[Bot] Clicked join button via iframe: {sel}")
-                            joined = True
-                            break
+                            # Try iframe
+                            frame_btn = page.frame_locator("*").locator(sel).first
+                            if frame_btn.is_visible():
+                                frame_btn.click(force=True)
+                                print(f"[Bot] Clicked join button via iframe: {sel}")
+                                try:
+                                    frame_btn.wait_for(state="hidden", timeout=5000)
+                                    joined = True
+                                    print("[Bot] Join button (iframe) disappeared. Transitioning...")
+                                    break
+                                except:
+                                    print("[Bot] Join button (iframe) still visible. Retrying...")
+
                         except Exception:
                             pass
-                    except Exception:
-                        pass
+                    
+                    if not joined:
+                        print(f"[Bot] Join attempt {attempt+1} failed. waiting...")
+                        time.sleep(2)
 
                 if not joined:
                     self._save_screenshot(page, "04_no_join_button", timestamp)
-                    raise Exception("Join button not found")
+                    # Dump HTML
+                    try:
+                        with open(self.output_dir / f"debug_prejoin_{timestamp}.html", "w", encoding="utf-8") as f:
+                            f.write(page.content())
+                    except: pass
+                    raise Exception("Join button not found or failed to click")
+
+                # 6b. Handle "Are you sure you don't want audio or video?" dialog
+                # Teams shows this modal when no mic/camera permissions are granted.
+                # We MUST click "Continue without audio or video" or the bot never enters the lobby.
+                print("[Bot] Checking for audio/video confirmation dialog...")
+                audio_confirm_selectors = [
+                    'button:has-text("Continue without audio or video")',
+                    'button:has-text("Continue without audio")',
+                    '[data-tid="prejoin-audio-video-confirm-continue-btn"]',
+                ]
+                for attempt in range(6):  # check for up to 6s
+                    dialog_handled = False
+                    for sel in audio_confirm_selectors:
+                        try:
+                            btn = page.locator(sel).first
+                            if btn.is_visible(timeout=1000):
+                                btn.click(force=True)
+                                print(f"[Bot] Dismissed audio/video dialog via: {sel}")
+                                dialog_handled = True
+                                time.sleep(1)
+                                self._save_screenshot(page, "04b_after_audio_dialog", timestamp)
+                                break
+                        except Exception:
+                            pass
+                    if dialog_handled:
+                        break
+                    time.sleep(1)
 
                 # 7. LOBBY DETECTION: Wait for admission (up to 3 minutes)
                 print("[Bot] Waiting for admission...")
@@ -223,8 +271,19 @@ class TeamsBot:
                         browser.close()
                         return None
 
-                    # Check if meeting ended while in lobby
+                    # Trigger toolbar visibility
                     try:
+                        page.mouse.move(100, 100)
+                        time.sleep(0.5)
+                        page.mouse.move(200, 200)
+                    except: pass
+
+                    # Check for end of meeting or removal via text (faster than visibility checks)
+                    try:
+                        full_text = page.locator("body").inner_text()
+                        if not full_text.strip():
+                            full_text = page.frame_locator("*").locator("body").first.inner_text()
+                        
                         end_texts = [
                             "The meeting has ended",
                             "Someone removed you from the meeting",
@@ -235,60 +294,70 @@ class TeamsBot:
                         ]
                         ended = False
                         for text in end_texts:
-                            if page.get_by_text(text, exact=False).first.is_visible():
-                                ended = True
-                                break
-                            if page.frame_locator("*").get_by_text(text, exact=False).first.is_visible():
+                            if text in full_text:
                                 ended = True
                                 break
                         if ended:
-                            print("[Bot] Meeting ended while waiting in lobby.")
+                            print(f"[Bot] Meeting ended or removal detected during lobby wait.")
                             browser.close()
                             return None
                     except Exception:
                         pass
 
-                    # Debug text check
-                    try:
-                        elapsed = time.time() - lobby_start
-                        if elapsed - last_lobby_log >= 30:
-                            all_text = page.locator("body").inner_text()
-                            if not all_text.strip():
-                                all_text = page.frame_locator("*").locator("body").first.inner_text()
-                            print(f"[Bot] Lobby Screen Text: {repr(all_text.strip().replace(chr(10), ' '))[:200]}")
-                    except Exception:
-                        pass
-
-                    # Check if admitted (Leave/Hang up button visible)
-                    inside_selectors = [
-                        '[aria-label*="Leave" i]',
-                        '[aria-label*="Hang up" i]',
-                        '[data-tid="hangup-button"]',
-                        '[aria-label*="leave meeting" i]',
-                    ]
+                    # Check for admission (is_in)
                     is_in = False
-                    
-                    try:
-                        # 1. Text-fallback (bulletproof)
-                        full_text = page.locator("body").inner_text()
-                        if not full_text.strip():
-                            full_text = page.frame_locator("*").locator("body").first.inner_text()
-                        if "Leave" in full_text and "Mic" in full_text and "Camera" in full_text:
-                            is_in = True
-                    except Exception:
-                        pass
 
-                    if not is_in:
+                    # Lobby-specific phrases — if any are present, we're definitely still in lobby
+                    lobby_phrases = [
+                        "Your camera is turned off",
+                        "Background filters",
+                        "Computer microphone and speaker controls",
+                        "Computer audio",
+                        "waiting to be let in",
+                        "Someone will let you in soon",
+                        "waiting to join",
+                        "Other people are in the meeting",
+                        "Please wait",
+                        "Joining the meeting",
+                    ]
+                    still_in_lobby = any(phrase in full_text for phrase in lobby_phrases)
+
+                    # 1. Text-based detection — only if no lobby phrases detected
+                    if not still_in_lobby:
+                        try:
+                            # More specific: meeting toolbar has "Leave" and timer/participant count
+                            if "Leave" in full_text and ("Mic" in full_text or "Camera" in full_text):
+                                is_in = True
+                        except:
+                            pass
+
+                    # 2. Selector-based detection — only use selectors exclusive to in-meeting UI
+                    # Deliberately EXCLUDING [aria-label*="camera" i], [aria-label*="Mute" i] etc.
+                    # because the lobby device-settings panel also has those controls.
+                    if not is_in and not still_in_lobby:
+                        inside_selectors = [
+                            '[data-tid="hangup-button"]',           # Red hang-up — meeting only
+                            '[data-tid="participants-button"]',     # Participant list — meeting only
+                            '[data-tid="chat-button"]',             # Chat panel — meeting only
+                            '[data-tid="callingButtons-showParticipants"]',
+                            '[aria-label="Leave meeting"]',         # Exact label — meeting only
+                            '[aria-label="Hang up"]',               # Exact label — meeting only
+                        ]
                         for sel in inside_selectors:
                             try:
                                 if page.locator(sel).first.is_visible():
                                     is_in = True
+                                    print(f"[Bot] Admitted! Detected via selector: {sel}")
                                     break
                                 if page.frame_locator("*").locator(sel).first.is_visible():
                                     is_in = True
+                                    print(f"[Bot] Admitted! Detected via iframe selector: {sel}")
                                     break
                             except Exception:
                                 pass
+
+                    if still_in_lobby and not is_in:
+                        pass  # Correctly identified as still in lobby
 
                     if is_in:
                         print("[Bot] Admitted to meeting!")
@@ -298,18 +367,29 @@ class TeamsBot:
                     elapsed = time.time() - lobby_start
                     if elapsed - last_lobby_log >= 30:
                         print(f"[Bot] Still in lobby... ({int(elapsed)}s elapsed)")
+                        print(f"[Bot] Screen text sample: {repr(full_text.strip().replace(chr(10), ' '))[:150]}")
                         self._save_screenshot(page, f"05_lobby_{int(elapsed)}s", timestamp)
                         last_lobby_log = elapsed
 
                     time.sleep(5)
                 else:
                     self._save_screenshot(page, "05_lobby_timeout", timestamp)
+                    # Dump HTML for debugging
+                    try:
+                        html_path = self.output_dir / f"debug_dump_timeout_{timestamp}.html"
+                        with open(html_path, "w", encoding="utf-8") as f:
+                            f.write(page.content())
+                        print(f"[Bot] HTML dump saved to: {html_path}")
+                    except Exception as e:
+                        print(f"[Bot] Failed to save HTML dump: {e}")
+                    
                     print("[Bot] Lobby timeout (3 min). No one admitted the bot.")
                     browser.close()
                     return None
 
                 print("[Bot] Joined! Starting recording...")
                 self._save_screenshot(page, "06_joined", timestamp)
+
 
             except Exception as e:
                 self._save_screenshot(page, "err_join", timestamp)
@@ -383,14 +463,23 @@ class TeamsBot:
                             full_text = page.frame_locator("*").locator("body").first.inner_text()
                             
                         # If standard active meeting toolbar text is visible (jiggled by mouse)
-                        if "Leave" in full_text and "Mic" in full_text and "Camera" in full_text:
+                        if "Leave" in full_text and ("Mic" in full_text or "Camera" in full_text):
                             is_active = True
                     except Exception:
                         pass
                         
                     # 2. Selector-based UI validation
                     if not is_active:
-                        for sel in ['[aria-label*="Leave" i]', '[aria-label*="Hang up" i]', '[data-tid="hangup-button"]']:
+                        active_selectors = [
+                            '[aria-label*="Leave" i]', 
+                            '[aria-label*="Hang up" i]', 
+                            '[data-tid="hangup-button"]',
+                            '[aria-label*="Mute" i]',
+                            '[aria-label*="Unmute" i]',
+                            '[aria-label*="camera" i]',
+                            '[data-tid="participants-button"]'
+                        ]
+                        for sel in active_selectors:
                             try:
                                 if page.locator(sel).first.is_visible():
                                     is_active = True

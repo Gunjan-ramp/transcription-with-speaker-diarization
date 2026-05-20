@@ -6,9 +6,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     xvfb \
     pulseaudio \
+    pulseaudio-utils \
+    libasound2 \
+    libasound2-plugins \
+    alsa-utils \
     ffmpeg \
     dbus-x11 \
-    libasound2 \
     curl \
     gnupg2 \
     unixodbc \
@@ -29,7 +32,7 @@ RUN pip install playwright && playwright install chromium
 
 # 4. Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt tzdata
+RUN pip install --no-cache-dir -r requirements.txt tzdata docker
 
 # 5. Copy code
 COPY . .
@@ -41,5 +44,11 @@ ENV PYTHONUNBUFFERED=1
 ENV DISPLAY=:99
 ENV XDG_RUNTIME_DIR=/tmp/pulse-runtime
 ENV PULSE_RUNTIME_PATH=/tmp/pulse-runtime
+ENV PULSE_SERVER=unix:/tmp/pulse-runtime/native
 
-CMD ["/app/entrypoint.sh"]
+# Add a healthcheck to ensure PulseAudio and Xvfb are running
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#   CMD pactl info || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python", "-m", "app.main"]

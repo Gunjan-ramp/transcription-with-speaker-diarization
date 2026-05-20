@@ -3,17 +3,14 @@ version: '3.8'
 services:
   teams-bot:
     build: .
+    image: transcription-bot-image
     container_name: transcription_teams_bot
     restart: unless-stopped
     ports:
-      - "8000:8000"
-    environment:
-      # Optional: Copy all .env variables here.
-      - TZ=UTC
+      - "50104:50104"
     volumes:
-      # Mount the outputs folder so recordings and transcripts persist on the host
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./output:/app/output
-      # Mount the .env file so secrets don't need to be hardcoded in the image
       - ./.env:/app/.env
     # The image is built from Playwright which requires IPC host for browser stability
     ipc: host
